@@ -1,0 +1,309 @@
+---
+title: "Quick Start Guide"
+description: "Get up to speed with AmiParis integration in 5 minutes - essential troubleshooting, key concepts, and immediate fixes."
+---
+
+# ⚡ Quick Start Guide
+
+<Info>
+**5-Minute Mastery**: Everything you need to understand, troubleshoot, and work with the AmiParis integration system.
+</Info>
+
+## 🎯 System Essentials
+
+<CardGroup cols={2}>
+  <Card title="🔄 What It Does" icon="refresh">
+    **Real-Time Integration Platform**
+    
+    Syncs orders from Shopify & Cegid to Salesforce, manages customers with smart deduplication, and handles multi-currency pricing automatically.
+  </Card>
+  <Card title="⚙️ How It Works" icon="cogs">
+    **Webhook → Transform → Store**
+    
+    External systems send webhooks, which go through security validation, metadata-driven transformation, and business logic before database operations.
+  </Card>
+</CardGroup>
+
+## 🚀 Integration Flow Overview
+
+<Steps>
+<Step title="🌐 Webhook Reception" icon="webhook">
+  **3 Endpoints** handle all integrations:
+  - `/notification/Order` → Shopify Orders & OrderItems
+  - `/notification` → Shopify Customer Accounts
+  - `/cegid/notification` → All Cegid entities (Account, Store, SA, Order)
+</Step>
+
+<Step title="🔒 Security Validation" icon="shield">
+  **Cryptographic Security**:
+  - **Shopify**: HMAC-SHA256 signature validation
+  - **Cegid**: Basic Auth + Bearer token validation
+</Step>
+
+<Step title="⚙️ Smart Transformation" icon="brain">
+  **PayloadTransformer.cls** applies business rules using SystemFieldMapping__mdt
+</Step>
+
+<Step title="💾 Database Magic" icon="database">
+  **External ID Strategy** prevents duplicates across all systems
+</Step>
+</Steps>
+
+## 🔧 Essential Components
+
+<Tabs>
+<Tab title="🧠 PayloadTransformer">
+  **The Heart** - Transforms JSON payloads using metadata configuration
+  
+  **Key Methods**:
+  - `transformToOrderAndOrderItems()` - Complex order processing
+  - `transformPayloads()` - Generic entity transformation  
+  - `applyTransformation()` - 15+ business rule types
+  
+  **Configuration**: SystemFieldMapping__mdt Custom Metadata Type
+</Tab>
+
+<Tab title="🎯 Integration Utilities">
+  **The Muscle** - Applies complex business logic after transformation
+  
+  **ShopifyIntegrationUtilities**:
+  - Order post-transformation rules
+  - Multi-currency pricebook management
+  - Product auto-creation logic
+  
+  **CegidIntegrationUtilities**:
+  - Multi-entity API integration
+  - Customer categorization (VIP/Employee/Press)
+  - Territory and commission assignment
+</Tab>
+
+<Tab title="📊 MiddlewareAction__c">
+  **The Memory** - Complete audit trail for every operation
+  
+  **Key Fields**:
+  - `Status__c` - Completed/Pending/Failed
+  - `Error__c` - Detailed error messages
+  - `Payload__c` - Original request for debugging
+  - `NbRetries__c` - Retry attempts remaining
+</Tab>
+</Tabs>
+
+## 🚨 Quick Troubleshooting
+
+<AccordionGroup>
+<Accordion title="🛒 Orders Not Appearing in Salesforce">
+  **Quick Diagnosis**:
+  
+  <Steps>
+  <Step title="Check Security">
+    Review debug logs for HMAC signature validation failures
+  </Step>
+  <Step title="Query Errors">
+    Check `MiddlewareAction__c` records for specific error details
+  </Step>
+  <Step title="Verify Webhooks">
+    Confirm webhook secrets match between external system and Salesforce
+  </Step>
+  </Steps>
+  
+  **Quick Fix**: Update webhook configuration in external system
+</Accordion>
+
+<Accordion title="💱 Currency-Related Failures">
+  **Symptoms**: "No Pricebook available for currency" errors
+  
+  **Quick Checks**:
+  - Verify Pricebook2 exists for the specific currency
+  - Confirm multi-currency is enabled in Salesforce org
+  - Check Standard Pricebook entries exist for products
+  
+  **Quick Fix**: Create pricebook for new currency or implement fallback policy
+</Accordion>
+
+<Accordion title="👥 Duplicate Customer Accounts">
+  **Symptoms**: Multiple accounts created for same customer
+  
+  **Root Causes**:
+  - Customer email address changed in external system
+  - External ID mapping configuration issues
+  - Deduplication logic bypassed
+  
+  **Quick Fix**: Review customer matching strategy and merge duplicates manually
+</Accordion>
+
+<Accordion title="🏪 Products Not Creating Automatically">
+  **Symptoms**: DML exceptions on Product2 insert operations
+  
+  **Common Issues**:
+  - Duplicate ProductCode values from concurrent webhooks
+  - Required field validation rule failures
+  - Governor limits exceeded
+  
+  **Quick Fix**: Check for existing products before creation attempt
+</Accordion>
+</AccordionGroup>
+
+## 🔍 Debug Information Locations
+
+<CardGroup cols={2}>
+  <Card title="📝 Debug Logs" icon="bug">
+    **Setup → Debug Logs**
+    
+    **Look For**:
+    - HMAC validation success/failure
+    - Transformation step details
+    - Business rule application results
+    - Database operation outcomes
+  </Card>
+  <Card title="📊 MiddlewareAction Records" icon="list">
+    **App Launcher → MiddlewareAction**
+    
+    **Contains**:
+    - Complete error messages with stack traces
+    - Retry counts and next retry schedules  
+    - Original payloads for debugging/replay
+    - Processing time and performance metrics
+  </Card>
+</CardGroup>
+
+## ⚙️ Key Configuration
+
+<Tabs>
+<Tab title="🗺️ SystemFieldMapping__mdt">
+  **Purpose**: Maps external JSON fields to Salesforce fields
+  
+  **Essential Fields**:
+  - `ExternalApiPath__c` - JSON path (e.g., `customer.email`, `lines[].quantity`)
+  - `SalesforceField__c` - Target field (e.g., `PersonEmail`, `Quantity`)  
+  - `TransformationLogic__c` - Business rule (e.g., `Concatenate`, `ShopifyStatusLogic`)
+  - `IsActive__c` - Enable/disable specific mappings
+  
+  **Location**: Setup → Custom Metadata Types → SystemFieldMapping
+</Tab>
+
+<Tab title="🔐 ExternalSystemCredential__mdt">
+  **Purpose**: Secure storage of API credentials and endpoints
+  
+  **Key Fields**:
+  - `BaseURL__c` - External system API base URL
+  - `Token__c` - Authentication token/secret (encrypted)
+  - `TenantID__c` - Multi-tenant identifier for Cegid
+  
+  **Location**: Setup → Custom Metadata Types → ExternalSystemCredential
+</Tab>
+
+<Tab title="🆔 SystemExternalIDs__mdt">  
+  **Purpose**: Defines external ID field mapping per system and object
+  
+  **Configuration**:
+  - `ExternalSystemName__c` - System identifier (e.g., 'Shopify Ami Paris')
+  - `SalesforceObject__c` - Object name (e.g., 'Order', 'Account')
+  - `ExternalIdName__c` - External ID field API name
+  
+  **Location**: Setup → Custom Metadata Types → SystemExternalIDs
+</Tab>
+</Tabs>
+
+## 📊 System Health Monitoring
+
+<CardGroup cols={4}>
+  <Card title="⚡ Processing Speed" icon="stopwatch">
+    Fast webhook response times for real-time synchronization
+  </Card>
+  <Card title="✅ High Reliability" icon="check-circle">
+    Robust processing with comprehensive error handling
+  </Card>
+  <Card title="📦 High Volume" icon="chart-bar">
+    Processes orders, customers, and sales data continuously
+  </Card>
+  <Card title="🔄 Error Recovery" icon="refresh">
+    Manual process via MiddlewareAction__c review and retry
+  </Card>
+</CardGroup>
+
+## 🎯 Quick Actions by Role
+
+<Tabs>
+<Tab title="👨‍💼 Business Users">
+  **Immediate Actions**:
+  
+  <Steps>
+  <Step title="Monitor Integration Health">
+    Check MiddlewareAction__c for recent failures or pending items
+  </Step>
+  <Step title="Verify Data Accuracy">  
+    Spot-check recent orders and customers in Salesforce vs source systems
+  </Step>
+  <Step title="Review Performance">
+    Monitor processing times and success rates for SLA compliance
+  </Step>
+  </Steps>
+</Tab>
+
+<Tab title="👨‍💻 Technical Users">
+  **Troubleshooting Toolkit**:
+  
+  <Steps>
+  <Step title="Debug Log Analysis">
+    Enable debug logs for webhook processing and review for errors
+  </Step>
+  <Step title="Metadata Configuration">
+    Review SystemFieldMapping__mdt for field mapping accuracy
+  </Step>
+  <Step title="Governor Limit Monitoring">
+    Check SOQL/DML usage during peak processing times
+  </Step>
+  <Step title="Security Validation">
+    Verify HMAC signatures and authentication tokens are current
+  </Step>
+  </Steps>
+</Tab>
+
+<Tab title="🏪 Store Operations">
+  **Daily Monitoring**:
+  
+  <Steps>
+  <Step title="Order Sync Status">
+    Verify today's orders appear correctly in Salesforce
+  </Step>
+  <Step title="Customer Data Quality">
+    Check for duplicate customer records and data inconsistencies  
+  </Step>
+  <Step title="Product Catalog Sync">
+    Confirm new products are created with correct pricing
+  </Step>
+  <Step title="Sales Associate Assignment">
+    Verify orders are assigned to correct SAs and stores
+  </Step>
+  </Steps>
+</Tab>
+</Tabs>
+
+## 📈 System Overview
+
+| **System** | **Response** | **Reliability** | **Volume** | **Status** |
+|------------|-------------|----------------|------------|------------|
+| **Shopify Ami Paris** | Fast processing | High reliability | High order volume | 🟢 Operational |
+| **Cegid Y2 Japan** | Quick response | Stable operation | Regular transactions | 🟢 Operational |
+| **Cegid Y2 Worldwide** | Efficient processing | Reliable sync | Continuous processing | 🟢 Operational |
+| **Overall Platform** | **Fast & Reliable** | **Robust Processing** | **High Volume** | **🟢 Healthy** |
+
+## 🚀 Next Steps
+
+<CardGroup cols={3}>
+  <Card title="🔄 Explore Full Workflow" href="/workflow-diagram" icon="diagram-project">
+    Detailed integration flow with visual diagrams
+  </Card>
+  <Card title="🏢 Access Salesforce" href="https://amiparis.my.salesforce.com" icon="cloud">
+    Live system monitoring and data verification  
+  </Card>
+  <Card title="📊 Interactive Diagrams" href="https://github.com/your-org/amiparis-integration/blob/main/AmiParis_Interactive_Documentation.html" icon="chart-line">
+    Hover-enabled workflow visualization
+  </Card>
+</CardGroup>
+
+---
+
+<Check>
+**You're Ready!** You now understand the core concepts, can troubleshoot common issues, and know where to find detailed information. Use the workflow diagram to dive deeper into specific components.
+</Check>

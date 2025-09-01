@@ -1,0 +1,322 @@
+
+---
+title: "Quick Reference Guide"
+description: "Essential information for developers, administrators, and business stakeholders working with the AmiParis Order Processing System."
+---
+
+## 🚀 Quick Start
+
+<CardGroup cols={2}>
+  <Card title="For Developers" icon="code">
+    **Essential Classes**: PayloadTransformer, ShopifyWebhookNotificationOrder, CegidIntegrationUtilities
+    
+    **Key Patterns**: Metadata-driven transformation, External ID strategy, HMAC validation
+  </Card>
+  <Card title="For Business Users" icon="chart-line">
+    **Core Functionality**: Real-time order sync, customer deduplication, multi-currency support
+    
+    **Critical Issues**: 12 identified gaps requiring stakeholder decisions
+  </Card>
+</CardGroup>
+
+## 📊 System Status Dashboard
+
+### Integration Health
+
+| **System** | **Status** | **Sync Mode** | **Reliability** |
+|------------|------------|---------------|------------------|
+| **Shopify Ami Paris** | 🟢 Active | Real-time | High |
+| **Cegid Y2 Japan** | 🟢 Active | Real-time | High |
+| **Cegid Y2 Worldwide** | 🟢 Active | Real-time | High |
+| **Alpha System** | 🟡 Configured | On-demand | Ready |
+
+### Critical Alerts
+
+<Warning>
+**🔴 CRITICAL**: Missing automatic retry mechanism for failed MiddlewareAction__c records
+</Warning>
+
+<Warning>
+**🟠 HIGH**: Mixed quantity order status logic requires business clarification
+</Warning>
+
+## 🔧 Developer Quick Reference
+
+### Core Components
+
+<Tabs>
+<Tab title="API Endpoints">
+  ```apex
+  // Shopify Order Processing
+  /services/apexrest/notification/Order
+  
+  // Shopify Customer Processing  
+  /services/apexrest/notification
+  
+  // Cegid Multi-Entity Processing
+  /services/apexrest/cegid/notification
+  ```
+</Tab>
+
+<Tab title="Key Classes">
+  ```apex
+  // Transformation Engine
+  PayloadTransformer.transformToOrderAndOrderItems()
+  PayloadTransformer.transformPayloads()
+  
+  // Business Logic
+  ShopifyIntegrationUtilities.applyOrderPostTransformationRules()
+  CegidIntegrationUtilities.UpsertCegidOrder()
+  
+  // Error Tracking
+  MiddlewareAction__c records for audit trail
+  ```
+</Tab>
+
+<Tab title="External ID Patterns">
+  ```apex
+  // Order External IDs
+  'Shopify Ami Paris-{order_id}'
+  'Cegid Y2 JP-{receipt_id}'
+  'Cegid Y2 WW-{receipt_id}'
+  
+  // OrderItem External IDs
+  'Shopify Ami Paris-{order_id}-{line_item_id}'
+  'Cegid Y2 JP-{order_id}-{ref_intern}-{line_id}'
+  
+  // Customer External IDs
+  'Shopify Ami Paris-{customer_id}'
+  'Cegid Y2 JP-{customer_id}'
+  ```
+</Tab>
+</Tabs>
+
+### Configuration Quick Access
+
+<AccordionGroup>
+<Accordion title="SystemFieldMapping__mdt">
+  **Location**: Setup → Custom Metadata Types → SystemFieldMapping
+  
+  **Key Fields**:
+  - `ExternalApiPath__c`: JSON path (e.g., `customer.email`, `lines[].quantity`)
+  - `SalesforceField__c`: Target field (e.g., `PersonEmail`, `Quantity`)
+  - `TransformationLogic__c`: Business rule (e.g., `ShopifyStatusLogic`, `Concatenate`)
+  - `IsActive__c`: Enable/disable mapping
+</Accordion>
+
+<Accordion title="ExternalSystemCredential__mdt">
+  **Location**: Setup → Custom Metadata Types → ExternalSystemCredential
+  
+  **Key Fields**:
+  - `BaseURL__c`: API endpoint base URL
+  - `Token__c`: Authentication token/secret
+  - `TenantID__c`: Multi-tenant identifier
+  - `ExternalSystemName__c`: System identifier
+</Accordion>
+
+<Accordion title="SystemExternalIDs__mdt">
+  **Location**: Setup → Custom Metadata Types → SystemExternalIDs
+  
+  **Purpose**: Defines external ID field mapping per system and object
+  
+  **Key Fields**:
+  - `ExternalSystemName__c`: System identifier
+  - `SalesforceObject__c`: Object name
+  - `ExternalIdName__c`: External ID field API name
+</Accordion>
+</AccordionGroup>
+
+## 📋 Business Logic Reference
+
+### Order Status Calculation
+
+<Tabs>
+<Tab title="Shopify Logic">
+  ```apex
+  if (cancelled_at != null) {
+      status = 'cancelled';
+  } else if (financial_status == 'voided') {
+      status = 'cancelled';
+  } else {
+      status = financial_status; // paid, pending, etc.
+  }
+  ```
+</Tab>
+
+<Tab title="Cegid Logic">
+  ```apex
+  if (allQuantitiesPositive) {
+      status = 'paid';
+  } else if (allQuantitiesNegative) {
+      status = 'returned';
+  } else {
+      status = 'partially_refunded';
+  }
+  ```
+  
+  <Warning>
+  **Gap**: No handling for mixed quantities that sum to zero
+  </Warning>
+</Tab>
+</Tabs>
+
+### Customer Categorization
+
+**Cegid Customer Categories** (based on UserDefined field ID=5):
+
+<CardGroup cols={2}>
+  <Card title="VIP Customers" icon="star">
+    `BC`, `VIP`, `VIP30`, `VIP50`, `VIPJP`, `NEO30`
+  </Card>
+  <Card title="Employees" icon="user-tie">
+    `AMI30`, `AMI40`, `EXAMI`, `EXVP`, `NSW30`
+  </Card>
+  <Card title="Press/Media" icon="newspaper">
+    `PR30`, `PRE20`, `PRF20`, `PRJ20`, `PRU20`, `PRUK20`
+  </Card>
+  <Card title="Special Cases" icon="exclamation-triangle">
+    `FRAUD` → FRAUD category, Others → CUSTOMER
+  </Card>
+</CardGroup>
+
+## 🔍 Troubleshooting Guide
+
+### Common Issues
+
+<AccordionGroup>
+<Accordion title="Webhook Failures">
+  **Symptoms**: Orders not appearing in Salesforce
+  
+  **Check**:
+  1. HMAC signature validation in debug logs
+  2. MiddlewareAction__c records for error details
+  3. External system webhook configuration
+  
+  **Resolution**: Verify webhook secrets match between systems
+</Accordion>
+
+<Accordion title="Currency Errors">
+  **Symptoms**: "No Pricebook available for currency" error
+  
+  **Check**:
+  1. Pricebook2 records for the currency
+  2. Multi-currency enabled in org
+  3. Standard Pricebook entries exist
+  
+  **Resolution**: Create pricebook for new currency or implement fallback
+</Accordion>
+
+<Accordion title="Product Creation Failures">
+  **Symptoms**: DML exception on Product2 insert
+  
+  **Check**:
+  1. Duplicate ProductCode values
+  2. Required field validation rules
+  3. Concurrent webhook processing
+  
+  **Resolution**: Add duplicate checking before creation
+</Accordion>
+
+<Accordion title="Customer Duplication">
+  **Symptoms**: Multiple accounts for same customer
+  
+  **Check**:
+  1. Email address changes in external system
+  2. Deduplication logic in CegidIntegrationUtilities
+  3. External ID mapping configuration
+  
+  **Resolution**: Review customer matching strategy
+</Accordion>
+</AccordionGroup>
+
+### Debug Information
+
+<Tabs>
+<Tab title="Logs to Review">
+  **Debug Logs** (Setup → Debug Logs):
+  - HMAC validation success/failure
+  - Payload transformation details
+  - Business rule application results
+  - Database operation outcomes
+  
+  **MiddlewareAction__c Records**:
+  - Operation type and status
+  - Error messages and stack traces
+  - Retry count and next retry time
+  - Original payload for replay
+</Tab>
+
+<Tab title="Performance Monitoring">
+  **Key Metrics**:
+  - Webhook response time (optimized for speed)
+  - Success rate by system (high reliability)
+  - Error queue depth (pending MiddlewareAction__c)
+  - CPU and memory usage during processing
+  
+  **Governor Limits**:
+  - SOQL queries (100 per transaction)
+  - DML operations (150 per transaction)
+  - HTTP callouts (100 per transaction)
+  - CPU time (10,000ms synchronous)
+</Tab>
+</Tabs>
+
+## 📞 Support Contacts
+
+### Business Stakeholders
+
+<CardGroup cols={2}>
+  <Card title="Order Processing Questions" icon="shopping-cart">
+    **Contact**: Finance Team
+    **For**: Order status rules, currency policies, refund logic
+  </Card>
+  <Card title="Customer Management" icon="users">
+    **Contact**: Customer Service Lead
+    **For**: Deduplication rules, category changes, data policies
+  </Card>
+  <Card title="Sales Operations" icon="chart-simple">
+    **Contact**: Sales Management
+    **For**: Territory assignment, commission rules, SA management
+  </Card>
+  <Card title="Technical Issues" icon="tools">
+    **Contact**: IT Operations
+    **For**: System errors, performance issues, monitoring
+  </Card>
+</CardGroup>
+
+## 🎯 Critical Actions Required
+
+### Immediate (This Week)
+
+<Steps>
+<Step title="Business Decisions">
+  **Schedule stakeholder workshop** to address:
+  - Mixed quantity order status rules
+  - Currency fallback policy  
+  - Customer email change handling
+</Step>
+
+<Step title="Technical Review">
+  **Review critical issues** in detail:
+  - Missing retry mechanism implementation plan
+  - Product creation race condition fixes
+  - Performance optimization roadmap
+</Step>
+</Steps>
+
+### Planned Improvements
+
+- **Implement automatic retry mechanism** for MiddlewareAction__c
+- **Fix product creation validation** to prevent duplicates  
+- **Add currency fallback logic** based on business decisions
+- **Enhance error handling** for better visibility
+- **Performance optimization** with queueable processing
+- **Advanced monitoring** dashboard implementation
+- **Business intelligence** reporting on integration metrics
+- **Multi-region support** enhancements
+
+---
+
+<Info>
+**Quick Reference Last Updated**: December 2024 | **System Version**: Production | **Next Review**: After critical fixes implementation
+</Info>

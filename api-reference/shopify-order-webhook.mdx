@@ -1,0 +1,523 @@
+---
+title: "Shopify Order Webhook"
+description: "Primary webhook endpoint for processing Shopify order creation, updates, and refunds with HMAC validation."
+---
+
+## Endpoint Overview
+
+**Primary order processing webhook** that handles complex order + order items processing from Shopify with full refund and return support.
+
+<ParamField path="endpoint" type="string">
+  `/notification/Order`
+</ParamField>
+
+<ParamField path="method" type="string">
+  `POST`
+</ParamField>
+
+<ParamField path="authentication" type="string">
+  HMAC-SHA256 signature validation
+</ParamField>
+
+## Request Headers
+
+<ParamField header="X-Shopify-Topic" type="string" required>
+  The webhook topic (e.g., `orders/create`, `orders/updated`, `orders/cancelled`)
+</ParamField>
+
+<ParamField header="X-Shopify-Hmac-Sha256" type="string" required>
+  Base64-encoded HMAC-SHA256 signature of the request body using the webhook secret
+</ParamField>
+
+<ParamField header="X-Shopify-Shop-Domain" type="string" required>
+  The shop domain triggering the webhook (e.g., `ami-paris.myshopify.com`)
+</ParamField>
+
+<ParamField header="Content-Type" type="string" required>
+  `application/json`
+</ParamField>
+
+## Security Validation
+
+<Warning>
+All webhooks **must** include valid HMAC-SHA256 signatures. Invalid signatures are rejected with 401 Unauthorized.
+</Warning>
+
+### HMAC Calculation
+
+The webhook signature is calculated using:
+
+<CodeGroup>
+```javascript Node.js
+const crypto = require('crypto');
+
+function calculateHMAC(body, secret) {
+    return crypto
+        .createHmac('sha256', secret)
+        .update(body, 'utf8')
+        .digest('base64');
+}
+```
+
+```python Python
+import base64
+import hashlib
+import hmac
+
+def calculate_hmac(body, secret):
+    return base64.b64encode(
+        hmac.new(secret.encode('utf-8'), body.encode('utf-8'), hashlib.sha256).digest()
+    ).decode()
+```
+
+```apex Salesforce Validation
+private static String computeHmacSha256(Blob data, String secret) {
+    Blob secretBlob = Blob.valueOf(secret);
+    Blob hmacBlob = Crypto.generateMac('HmacSHA256', data, secretBlob);
+    return EncodingUtil.base64Encode(hmacBlob);
+}
+```
+</CodeGroup>
+
+## Request Body Structure
+
+### Order Creation Payload
+
+<Tabs>
+<Tab title="Order Object">
+  <ParamField body="id" type="integer" required>
+    Unique Shopify order identifier
+  </ParamField>
+  
+  <ParamField body="order_number" type="string" required>
+    Human-readable order number displayed to customers
+  </ParamField>
+  
+  <ParamField body="financial_status" type="string" required>
+    Payment status: `pending`, `paid`, `refunded`, `voided`, `partially_refunded`
+  </ParamField>
+  
+  <ParamField body="cancelled_at" type="string">
+    ISO 8601 timestamp when order was cancelled (null if not cancelled)
+  </ParamField>
+  
+  <ParamField body="currency" type="string" required>
+    Three-letter ISO 4217 currency code (e.g., `USD`, `EUR`, `JPY`)
+  </ParamField>
+  
+  <ParamField body="total_price" type="string" required>
+    Total order amount including taxes and shipping
+  </ParamField>
+</Tab>
+
+<Tab title="Customer Object">
+  <ParamField body="customer.id" type="integer">
+    Unique Shopify customer identifier
+  </ParamField>
+  
+  <ParamField body="customer.email" type="string">
+    Customer email address for account matching
+  </ParamField>
+  
+  <ParamField body="customer.first_name" type="string">
+    Customer first name
+  </ParamField>
+  
+  <ParamField body="customer.last_name" type="string">
+    Customer last name  
+  </ParamField>
+</Tab>
+
+<Tab title="Line Items Array">
+  <ParamField body="line_items[]" type="array" required>
+    Array of order line items
+    
+    <Expandable title="Line Item Properties">
+      <ParamField body="line_items[].id" type="integer" required>
+        Unique line item identifier
+      </ParamField>
+      
+      <ParamField body="line_items[].product_id" type="integer">
+        Shopify product identifier
+      </ParamField>
+      
+      <ParamField body="line_items[].variant_id" type="integer">
+        Shopify product variant identifier
+      </ParamField>
+      
+      <ParamField body="line_items[].sku" type="string">
+        Product SKU for inventory tracking
+      </ParamField>
+      
+      <ParamField body="line_items[].quantity" type="integer" required>
+        Quantity ordered (positive for sales, negative for returns)
+      </ParamField>
+      
+      <ParamField body="line_items[].price" type="string" required>
+        Unit price before discounts
+      </ParamField>
+      
+      <ParamField body="line_items[].total_discount" type="string">
+        Total discount amount applied to this line item
+      </ParamField>
+    </Expandable>
+  </ParamField>
+</Tab>
+
+<Tab title="Refunds Array">
+  <ParamField body="refunds[]" type="array">
+    Array of refund transactions (for orders with refunds)
+    
+    <Expandable title="Refund Properties">
+      <ParamField body="refunds[].id" type="integer">
+        Unique refund identifier
+      </ParamField>
+      
+      <ParamField body="refunds[].created_at" type="string">
+        ISO 8601 timestamp when refund was created
+      </ParamField>
+      
+      <ParamField body="refunds[].refund_line_items[]" type="array">
+        Array of refunded line items
+        
+        <Expandable title="Refund Line Item Properties">
+          <ParamField body="refunds[].refund_line_items[].line_item_id" type="integer">
+            Reference to original line item being refunded
+          </ParamField>
+          
+          <ParamField body="refunds[].refund_line_items[].quantity" type="integer">
+            Quantity being refunded
+          </ParamField>
+          
+          <ParamField body="refunds[].refund_line_items[].subtotal" type="string">
+            Refund amount for this line item
+          </ParamField>
+        </Expandable>
+      </ParamField>
+    </Expandable>
+  </ParamField>
+</Tab>
+</Tabs>
+
+## Sample Requests
+
+### Order Creation
+
+<RequestExample>
+```json Order Creation Webhook
+{
+  "id": 5678901234,
+  "order_number": "AP-1001", 
+  "financial_status": "paid",
+  "cancelled_at": null,
+  "currency": "EUR",
+  "total_price": "299.99",
+  "customer": {
+    "id": 1234567890,
+    "email": "customer@example.com",
+    "first_name": "Marie",
+    "last_name": "Dupont"
+  },
+  "line_items": [
+    {
+      "id": 11111111,
+      "product_id": 7777777,
+      "variant_id": 8888888,
+      "sku": "AMI-SHIRT-001",
+      "quantity": 2,
+      "price": "149.99",
+      "total_discount": "0.00"
+    }
+  ],
+  "refunds": []
+}
+```
+</RequestExample>
+
+### Order with Refund
+
+<RequestExample>
+```json Order Update with Refund
+{
+  "id": 5678901234,
+  "order_number": "AP-1001",
+  "financial_status": "partially_refunded", 
+  "cancelled_at": null,
+  "currency": "EUR",
+  "total_price": "149.99",
+  "customer": {
+    "id": 1234567890,
+    "email": "customer@example.com"
+  },
+  "line_items": [
+    {
+      "id": 11111111,
+      "quantity": 2,
+      "price": "149.99"
+    }
+  ],
+  "refunds": [
+    {
+      "id": 9999999,
+      "created_at": "2024-12-01T14:30:00Z",
+      "refund_line_items": [
+        {
+          "line_item_id": 11111111,
+          "quantity": 1,
+          "subtotal": "149.99"
+        }
+      ]
+    }
+  ]
+}
+```
+</RequestExample>
+
+## Response Format
+
+### Success Response
+
+<ResponseExample>
+```json Success
+{
+  "status": "OK",
+  "message": "Order processed successfully"
+}
+```
+</ResponseExample>
+
+### Error Responses
+
+<Tabs>
+<Tab title="Authentication Error">
+  <ResponseExample>
+  ```json 401 Unauthorized
+  {
+    "status": "error",
+    "message": "Invalid Webhook Signature",
+    "code": "HMAC_VALIDATION_FAILED"
+  }
+  ```
+  </ResponseExample>
+</Tab>
+
+<Tab title="Processing Error">
+  <ResponseExample>
+  ```json 500 Internal Server Error
+  {
+    "status": "error", 
+    "message": "Order processing failed",
+    "code": "PROCESSING_ERROR",
+    "details": "No Pricebook available for currency: GBP"
+  }
+  ```
+  </ResponseExample>
+</Tab>
+</Tabs>
+
+## Processing Flow
+
+<Steps>
+<Step title="Webhook Reception">
+  Shopify sends HTTP POST to `/notification/Order` with order data and HMAC signature
+</Step>
+
+<Step title="Security Validation">
+  System validates HMAC-SHA256 signature using stored webhook secret
+  
+  <Check>
+  Signature validation prevents unauthorized webhook processing
+  </Check>
+</Step>
+
+<Step title="Payload Transformation">
+  PayloadTransformer.cls applies metadata-driven field mappings and business logic:
+  - Order status calculation (paid/cancelled/refunded)
+  - Customer account resolution
+  - Product SKU to Product2 mapping
+  - Currency-specific pricebook assignment
+</Step>
+
+<Step title="Business Rules Application">
+  ShopifyIntegrationUtilities applies post-transformation rules:
+  - Account external ID resolution
+  - Store assignment (defaults to 'WEB' for online orders)
+  - Sales associate assignment (if applicable)
+  - Product auto-creation for missing SKUs
+  - PricebookEntry management for multi-currency support
+</Step>
+
+<Step title="Database Operations">
+  System performs external ID-based upserts:
+  - Order record creation/update
+  - OrderItem records for each line item
+  - Product2 creation for new SKUs
+  - PricebookEntry creation for new currency/product combinations
+</Step>
+
+<Step title="Success Tracking">
+  MiddlewareAction__c record tracks operation outcome:
+  - Success: Status = 'Completed'
+  - Failure: Status = 'Pending' with error details and retry count
+</Step>
+</Steps>
+
+## Business Logic Details
+
+### Order Status Calculation
+
+<CodeGroup>
+```apex Shopify Status Logic
+if (cancelledAt != null && !String.isEmpty(cancelledAt.trim())) {
+    status = 'cancelled';
+} else if (financialStatus == 'voided') {
+    status = 'cancelled';
+} else {
+    status = financialStatus; // paid, pending, refunded, etc.
+}
+```
+
+```apex Refund Amount Calculation
+// Applied to OrderItems based on refund_line_items
+for (Object refund : refunds) {
+    List<Object> refundLineItems = (List<Object>) ((Map<String, Object>) refund).get('refund_line_items');
+    for (Object refundItem : refundLineItems) {
+        String lineItemId = String.valueOf(((Map<String, Object>) refundItem).get('line_item_id'));
+        Decimal refundAmount = Decimal.valueOf(String.valueOf(((Map<String, Object>) refundItem).get('subtotal')));
+        // Apply to matching OrderItem.AmountRefunded__c
+    }
+}
+```
+</CodeGroup>
+
+### External ID Generation
+
+<Warning>
+External IDs are critical for preventing duplicate records across systems.
+</Warning>
+
+<CodeGroup>
+```apex Order External ID
+// Pattern: Shopify Ami Paris-{order_id}
+String orderExternalId = 'Shopify Ami Paris-' + payload.get('id');
+```
+
+```apex OrderItem External ID  
+// Pattern: Shopify Ami Paris-{order_id}-{line_item_id}
+String itemExternalId = 'Shopify Ami Paris-' + orderExtId + '-' + itemData.get('id');
+```
+</CodeGroup>
+
+## Error Handling
+
+### Common Error Scenarios
+
+<AccordionGroup>
+<Accordion title="Invalid HMAC Signature">
+  **Cause**: Webhook secret mismatch or payload tampering
+  
+  **Response**: 401 Unauthorized
+  
+  **Resolution**: Verify webhook secret configuration in Shopify and Salesforce
+</Accordion>
+
+<Accordion title="Unsupported Currency">
+  **Cause**: Order contains currency without corresponding pricebook
+  
+  **Response**: 500 Internal Server Error
+  
+  **Resolution**: Create pricebook for new currency or implement fallback logic
+</Accordion>
+
+<Accordion title="Missing Customer Account">
+  **Cause**: Customer ID cannot be resolved to existing Salesforce account
+  
+  **Behavior**: Creates new account or processes order without customer association
+  
+  **Monitoring**: Check MiddlewareAction__c for warnings
+</Accordion>
+
+<Accordion title="Product Creation Failure">
+  **Cause**: Concurrent product creation or validation errors
+  
+  **Response**: 500 Internal Server Error with retry
+  
+  **Resolution**: MiddlewareAction__c retry mechanism processes failed records
+</Accordion>
+</AccordionGroup>
+
+## Testing
+
+### Webhook Testing Tools
+
+<Tabs>
+<Tab title="ngrok + Local Development">
+  ```bash
+  # Install ngrok for local webhook testing
+  npm install -g ngrok
+  
+  # Expose local Salesforce org
+  ngrok http 80 --subdomain=your-org-name
+  
+  # Configure Shopify webhook URL
+  https://your-org-name.ngrok.io/services/apexrest/notification/Order
+  ```
+</Tab>
+
+<Tab title="Postman Collection">
+  ```json
+  {
+    "info": {
+      "name": "AmiParis Shopify Webhooks"
+    },
+    "item": [
+      {
+        "name": "Order Creation Test",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "X-Shopify-Topic",
+              "value": "orders/create"
+            },
+            {
+              "key": "X-Shopify-Hmac-Sha256",
+              "value": "{{calculated_hmac}}"
+            }
+          ],
+          "url": "{{salesforce_instance}}/services/apexrest/notification/Order"
+        }
+      }
+    ]
+  }
+  ```
+</Tab>
+</Tabs>
+
+## Monitoring & Troubleshooting
+
+### Key Metrics to Monitor
+
+- **Success Rate**: Percentage of successfully processed webhooks
+- **Processing Time**: Average time from webhook receipt to completion
+- **Error Rate by Type**: HMAC failures vs processing errors vs business logic errors
+- **Retry Queue Depth**: Number of pending MiddlewareAction__c records
+
+### Debug Logs
+
+<Info>
+Enable debug logging in Setup → Debug Logs for detailed webhook processing traces.
+</Info>
+
+Key log points:
+- HMAC validation success/failure
+- Payload transformation details
+- Business rule application results
+- Database operation outcomes
+- Error exception details
+
+---
+
+<Check>
+**Production Ready**: This endpoint handles high-volume order processing with comprehensive error handling and monitoring capabilities.
+</Check>
